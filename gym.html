@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gym Tracker Fit</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        :root { --bg: #050505; --card: #111111; --accent: #00f2ff; --text: #f5f5f5; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; padding-bottom: 60px; -webkit-tap-highlight-color: transparent; }
+        .header { background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); border-bottom: 2px solid var(--accent); position: sticky; top: 0; z-index: 1000; }
+        .days-wrapper { display: flex; flex-direction: column; gap: 20px; padding: 15px; max-width: 600px; margin: 0 auto; }
+        .day-card { background: var(--card); border-radius: 28px; overflow: hidden; border: 1px solid #222; transition: all 0.3s ease; }
+        .day-card.collapsed { opacity: 0.8; }
+        .img-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(50%, 1fr)); height: 180px; background: #000; overflow: hidden; transition: 0.4s ease; }
+        .img-grid.hidden { height: 0; opacity: 0; }
+        .img-grid img { width: 100%; height: 100%; object-fit: cover; opacity: 0.45; }
+        h4, h5, label, .fw-bold { color: #f5f5f5 !important; }
+        .text-accent { color: var(--accent) !important; }
+        .text-muted { color: #888 !important; }
+        .cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 15px 0; }
+        .btn-cat { background: #1a1a1a; border: 1px solid #333; color: #777; border-radius: 12px; padding: 10px 2px; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; transition: 0.2s; }
+        .btn-cat.active { background: var(--accent); color: #000; border-color: var(--accent); box-shadow: 0 0 15px rgba(0, 242, 255, 0.3); }
+        .ex-item-check { background: #181818; padding: 14px; border-radius: 18px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #252525; }
+        
+        /* Modificaciones de la Tarjeta de Rutina */
+        .routine-item { background: #161616; padding: 20px; border-radius: 22px; margin-bottom: 12px; border-left: 5px solid var(--accent); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); transition: all 0.3s ease; }
+        
+        /* Estilos para estado Completado */
+        .routine-item.completed { border-left: 5px solid #28a745; opacity: 0.6; background: #101010; }
+        .routine-item.completed .h6 { text-decoration: line-through; color: #888 !important; }
+        
+        /* Botón de Check y Handle de Arrastre */
+        .check-btn { font-size: 1.6rem; cursor: pointer; transition: transform 0.2s ease; z-index: 10; }
+        .check-btn:active { transform: scale(0.8); }
+        .drag-handle { color: #444; font-size: 1.3rem; cursor: grab; padding: 10px 15px 10px 0; }
+        .drag-handle:active { cursor: grabbing; }
+
+        .badge-cat { font-size: 0.6rem; background: rgba(0, 242, 255, 0.1); color: var(--accent); padding: 4px 10px; border-radius: 6px; font-weight: bold; border: 1px solid rgba(0, 242, 255, 0.2); }
+        .last-record { font-size: 0.7rem; color: #555; font-style: italic; margin-top: 2px; }
+        .recovery-zone { text-align: center; padding: 40px 20px; border-radius: 20px; background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)), url('https://images.unsplash.com/photo-1594911772125-07fc7a2d8d9f?w=600'); background-size: cover; border: 1px dashed #333; }
+        .swal2-popup { border-radius: 25px !important; background: #121212 !important; color: #f5f5f5 !important; }
+        .swal2-input, .swal2-select { background: #1a1a1a !important; color: white !important; border: 1px solid #333 !important; }
+        
+        /* Clase generada por Sortable al arrastrar */
+        .sortable-ghost { opacity: 0.4; background: #222; border: 1px dashed var(--accent); }
+    </style>
+</head>
+<body>
+    <header class="header p-3 text-center">
+        <h4 class="mb-0 fw-bold tracking-tighter">GYM<span class="text-accent"> TRACKER</span> FIT <i class="fa fa-dumbbell text-accent"></i></h4>
+    </header>
+    <main class="days-wrapper" id="mainContainer"></main>
+
+    <script>
+        const db = new Dexie("GymProFinalDB");
+        db.version(1).stores({ config: "id", rutinas: "dia" });
+        const catalogBase = { pecho: ["Press Banca", "Press Inclinado", "Aperturas"], espalda: ["Dominadas", "Remo con Barra", "Jalón"], hombros: ["Press Militar", "Laterales", "Pájaros"], piernas: ["Sentadilla", "Prensa", "Extensiones"], biceps: ["Curl Barra", "Martillo"], triceps: ["Copa", "Polea Alta"], abs: ["Crunch Cuerda", "Elevación Piernas"], antebrazo: ["Curl Inverso"] },
+              imgLib = { pecho: "https://t3.ftcdn.net/jpg/03/31/56/22/360_F_331562231_qbUl4FxFl2mlK5wlOh4PiEA7k2xMXGeD.jpg", espalda: "https://c4.wallpaperflare.com/wallpaper/150/221/189/man-back-workout-bodybuilding-wallpaper-preview.jpg", hombros: "https://images.pexels.com/photos/7289370/pexels-photo-7289370.jpeg?cs=srgb&dl=pexels-alesiakozik-7289370.jpg&fm=jpg", piernas: "https://png.pngtree.com/thumb_back/fh260/background/20220801/pngtree-man-performing-leg-workouts-using-gym-machines-for-leg-strength-training-photo-image_47838204.jpg", biceps: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRspfkL_miy_8sfXrUUL5xJuvgCM_zfpSussw&s", triceps: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTmgGnwa5lzX5RakAbAyi9WdzXhoMtLxRv8tA&s", abs: "https://i0.wp.com/www.muscleandfitness.com/wp-content/uploads/2019/01/man-abs-core-1109.jpg?quality=86&strip=all", antebrazo: "https://ae-pic-a1.aliexpress-media.com/kf/S3a02d61fafd54b3790cf60b534211644A.png", descanso: "https://i0.wp.com/www.strengthlog.com/wp-content/uploads/2026/03/rest-day-scaled.jpg?fit=2560%2C1707&ssl=1" },
+              diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+        async function getOrCreateDay(e) {
+            let t = await db.rutinas.get(e);
+            return t || (t = { dia: e, categorias: [], ejercicios: [], modoEdicion: !0, esDescanso: !1, visible: !0 }, await db.rutinas.put(t)), t
+        }
+
+        async function init() {
+            await db.config.get("catalogos") || await db.config.put({ id: "catalogos", data: catalogBase });
+            render();
+        }
+
+        async function render() {
+            const e = document.getElementById("mainContainer");
+            e.innerHTML = "";
+            for (const t of diasSemana) {
+                const a = await getOrCreateDay(t),
+                      n = document.createElement("div");
+                n.className = "day-card " + (a.visible ? "" : "collapsed");
+                const s = a.categorias.length;
+                let i = a.esDescanso ? `<img src="${imgLib.descanso}">` : s > 0 ? a.categorias.map(e => `<img src="${imgLib[e]}">`).join("") : `<img src="${imgLib.descanso}" style="filter:grayscale(1)">`;
+                
+                n.innerHTML = `
+                    <div class="img-grid ${a.visible ? "" : "hidden"}">${i}</div>
+                    <div class="p-4">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h4 class="mb-0 fw-bold">${t}</h4>
+                                ${a.visible ? "" : '<span class="text-accent small">Oculto</span>'}
+                            </div>
+                            <div class="d-flex gap-3">
+                                <button class="btn btn-sm ${a.esDescanso ? "btn-info" : "btn-dark"}" onclick="handleRest('${t}')">
+                                    <i class="fa ${a.esDescanso ? "fa-couch" : "fa-dumbbell"}"></i>
+                                </button>
+                                <button class="btn btn-link text-accent p-0" onclick="handleVisibility('${t}')">
+                                    <i class="fa ${a.visible ? "fa-chevron-up" : "fa-chevron-down"}"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="${a.visible ? "" : "d-none"} mt-3">
+                            ${a.esDescanso ? renderRestView(t) : a.modoEdicion ? renderEditor(t, a) : renderRoutine(t, a)}
+                        </div>
+                    </div>`;
+                
+                if (a.modoEdicion && a.visible && !a.esDescanso) setTimeout(() => updateChecks(t, a), 10);
+                e.appendChild(n);
+
+                // INICIALIZAR DRAG AND DROP DESPUÉS DE RENDERIZAR
+                if (!a.modoEdicion && !a.esDescanso && a.visible && a.ejercicios.length > 0) {
+                    const sortableList = document.getElementById(`sortable-${t}`);
+                    if (sortableList) {
+                        new Sortable(sortableList, {
+                            handle: '.drag-handle', // Solo arrastra desde las líneas para no bloquear el scroll móvil
+                            animation: 150,
+                            onEnd: async function (evt) {
+                                const dayData = await getOrCreateDay(t);
+                                // Extrae el elemento de su posición antigua y lo inserta en la nueva
+                                const movedItem = dayData.ejercicios.splice(evt.oldIndex, 1)[0];
+                                dayData.ejercicios.splice(evt.newIndex, 0, movedItem);
+                                await db.rutinas.put(dayData);
+                                // Renderiza para actualizar los índices en el HTML
+                                render(); 
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        function renderRestView(e) {
+            return '<div class="recovery-zone"><h3>DÍA DE DESCANSO</h3><p class="text-muted">Recuperando fibras musculares...</p></div>'
+        }
+
+        function renderEditor(e, t) {
+            return `
+                <div class="cat-grid">
+                    ${Object.keys(catalogBase).map(a => `
+                        <button class="btn-cat ${t.categorias.includes(a) ? "active" : ""}" onclick="handleCategory('${e}', '${a}')">${a}</button>
+                    `).join("")}
+                </div>
+                <div class="input-group mb-3">
+                    <input type="text" id="in-${e}" class="form-control bg-dark text-white border-0" placeholder="Nuevo ejercicio...">
+                    <button class="btn btn-info" onclick="handleAddExtra('${e}')"><i class="fa fa-plus"></i></button>
+                </div>
+                <div id="list-${e}"></div>
+                <button class="btn btn-info w-100 mt-3 py-3 fw-bold" style="border-radius:15px; color:#000" onclick="handleModo('${e}', false)">GUARDAR RUTINA</button>
+            `
+        }
+
+        async function updateChecks(e, t) {
+            const a = await db.config.get("catalogos"), n = document.getElementById(`list-${e}`);
+            if (!n) return;
+            let s = "";
+            t.categorias.forEach(n => {
+                s += `<div class="badge-cat mt-3 mb-2">${n.toUpperCase()}</div>`;
+                (a.data[n] || []).forEach(a => {
+                    const i = t.ejercicios.some(e => e.nombre === a);
+                    s += `
+                        <div class="ex-item-check">
+                            <div class="d-flex align-items-center flex-grow-1" onclick="handleCheck('${e}','${a}','${n}')" style="cursor:pointer">
+                                <i class="fa ${i ? "fa-check-square text-accent" : "fa-square text-muted"} fs-5"></i>
+                                <label class="ms-3 fw-bold">${a}</label>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-link text-info p-0" onclick="handleRename('${n}','${a}')"><i class="fa fa-edit"></i></button>
+                                <button class="btn btn-link text-danger p-0" onclick="handleDeleteDb('${n}','${a}')"><i class="fa fa-trash"></i></button>
+                            </div>
+                        </div>`
+                })
+            });
+            n.innerHTML = s || '<p class="text-center text-muted small py-3">Selecciona un grupo muscular</p>'
+        }
+
+        // NUEVO RENDERIZADO DE RUTINA (Con Checkbox y Handle de Drag)
+        function renderRoutine(e, t) {
+            return `
+                <div class="d-flex justify-content-between mb-3 align-items-center">
+                    <span class="text-accent small fw-bold tracking-widest">RUTINA ACTIVA</span>
+                    <button class="btn btn-sm btn-outline-secondary text-white border-secondary px-3" onclick="handleModo('${e}', true)">EDITAR</button>
+                </div>
+                <div id="sortable-${e}">
+                    ${t.ejercicios.map((ex, a) => `
+                        <div class="routine-item ${ex.completado ? 'completed' : ''}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                
+                                <div class="d-flex align-items-center">
+                                    <i class="fa fa-grip-lines drag-handle"></i>
+                                    <i class="fa ${ex.completado ? 'fa-check-circle text-success' : 'fa-circle text-muted'} check-btn me-3" onclick="handleComplete('${e}', ${a}, event)"></i>
+                                    
+                                    <div onclick="handleStats('${e}', ${a})" style="cursor:pointer">
+                                        <span class="badge-cat mb-1">${ex.cat}</span>
+                                        <div class="fw-bold h6 mb-0">${ex.nombre}</div>
+                                        ${ex.lastPeso ? `<div class="last-record">Anterior: ${ex.lastPeso} ${ex.unidad}</div>` : ""}
+                                    </div>
+                                </div>
+                                
+                                <div class="text-end" onclick="handleStats('${e}', ${a})" style="cursor:pointer">
+                                    <div class="text-accent fw-bold" style="font-size:1.1rem">${ex.peso || 0} <small style="font-size:0.6rem">${ex.unidad || "LBS"}</small></div>
+                                    <div class="small text-muted">${ex.series || 0} Sets x ${ex.reps || 0} Reps</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join("") || '<p class="text-center text-muted py-4">No hay ejercicios en esta rutina</p>'}
+                </div>
+            `
+        }
+
+        // NUEVA FUNCIÓN PARA COMPLETAR EJERCICIOS
+        async function handleComplete(dia, index, event) {
+            event.stopPropagation(); // Evita que se abra el modal de editar datos
+            const data = await getOrCreateDay(dia);
+            data.ejercicios[index].completado = !data.ejercicios[index].completado; // Invierte el estado
+            await db.rutinas.put(data);
+            render(); // Actualiza la vista
+        }
+
+        async function handleVisibility(e) {
+            const t = await getOrCreateDay(e);
+            t.visible = !t.visible;
+            await db.rutinas.put(t);
+            render()
+        }
+
+        async function handleModo(e, t) {
+            const a = await getOrCreateDay(e);
+            a.modoEdicion = t;
+            await db.rutinas.put(a);
+            render()
+        }
+
+        async function handleRest(e) {
+            const t = await getOrCreateDay(e);
+            t.esDescanso = !t.esDescanso;
+            await db.rutinas.put(t);
+            render()
+        }
+
+        async function handleCategory(e, t) {
+            const a = await getOrCreateDay(e);
+            a.categorias.includes(t) ? (a.categorias = a.categorias.filter(e => e !== t), a.ejercicios = a.ejercicios.filter(e => e.cat !== t)) : a.categorias.push(t);
+            await db.rutinas.put(a);
+            render()
+        }
+
+        async function handleCheck(e, t, a) {
+            const n = await getOrCreateDay(e), s = n.ejercicios.findIndex(e => e.nombre === t);
+            // Agregado completado: false por defecto
+            s > -1 ? n.ejercicios.splice(s, 1) : n.ejercicios.push({ nombre: t, cat: a, peso: "", series: "", reps: "", unidad: "LBS", lastPeso: "", completado: false });
+            await db.rutinas.put(n);
+            updateChecks(e, n)
+        }
+
+        async function handleStats(e, t) {
+            const a = await getOrCreateDay(e), n = a.ejercicios[t], { value: s } = await Swal.fire({
+                title: n.nombre,
+                html: `
+                    <div class="text-start">
+                        <div class="mb-2 small text-accent">Récord Anterior: ${n.lastPeso || "--"} ${n.unidad}</div>
+                        <label class="small text-muted mb-1">Peso</label>
+                        <div class="input-group mb-3">
+                            <input id="sw-p" class="form-control" type="number" value="${n.peso}">
+                            <select id="sw-u" class="form-select">
+                                <option value="LBS" ${"LBS" === n.unidad ? "selected" : ""}>LBS</option>
+                                <option value="KGS" ${"KGS" === n.unidad ? "selected" : ""}>KGS</option>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <div class="col-6">
+                                <label class="small text-muted mb-1">Sets</label>
+                                <input id="sw-s" class="form-control" type="number" value="${n.series}">
+                            </div>
+                            <div class="col-6">
+                                <label class="small text-muted mb-1">Reps</label>
+                                <input id="sw-r" class="form-control" type="number" value="${n.reps}">
+                            </div>
+                        </div>
+                    </div>
+                `,
+                preConfirm: () => ({ peso: document.getElementById("sw-p").value, unidad: document.getElementById("sw-u").value, series: document.getElementById("sw-s").value, reps: document.getElementById("sw-r").value })
+            });
+            s && (n.peso && n.peso !== s.peso && (n.lastPeso = n.peso), a.ejercicios[t] = { ...n, ...s }, await db.rutinas.put(a), render())
+        }
+
+        async function handleAddExtra(e) {
+            const t = document.getElementById(`in-${e}`), a = t.value.trim(), n = await getOrCreateDay(e);
+            if (!a || 0 === n.categorias.length) return Swal.fire("Info", "Selecciona un músculo primero", "info");
+            const s = await db.config.get("catalogos"), i = n.categorias[n.categorias.length - 1];
+            s.data[i].push(a);
+            await db.config.put(s);
+            t.value = "";
+            render()
+        }
+
+        async function handleRename(e, t) {
+            const { value: a } = await Swal.fire({ title: "Editar nombre", input: "text", inputValue: t });
+            if (a && a !== t) {
+                const n = await db.config.get("catalogos");
+                n.data[e] = n.data[e].map(e => e === t ? a : e);
+                await db.config.put(n);
+                const s = await db.rutinas.toArray();
+                for (let e of s) e.ejercicios = e.ejercicios.map(e => e.nombre === t ? { ...e, nombre: a } : e), await db.rutinas.put(e);
+                render()
+            }
+        }
+
+        async function handleDeleteDb(e, t) {
+            if ((await Swal.fire({ title: "¿Eliminar de la BD?", icon: "warning", showCancelButton: !0 })).isConfirmed) {
+                const a = await db.config.get("catalogos");
+                a.data[e] = a.data[e].filter(e => e !== t);
+                await db.config.put(a);
+                render()
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
